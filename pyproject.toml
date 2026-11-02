@@ -13,6 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10"]
+openai-check = ["openai>=2,<3", "httpx>=0.27,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

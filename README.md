@@ -4,7 +4,7 @@
 
 AI Resume Tailor is an open-source project for improving a resume against a job description while keeping the candidate in control of the facts.
 
-> **Status: planning.** The architecture and safety boundaries are documented; the application, provider integrations, and exports are not implemented or verified yet.
+> **Status: planning and API setup.** The architecture and safety boundaries are documented. The resume application, provider adapters, and exports are not implemented or verified yet.
 
 ## Planned experience
 
@@ -30,6 +30,6 @@ The app will need an internet connection to access the chosen provider and optio
 - **4. Verification:** test document handling, hostile URLs, provider failures, privacy, accessibility, and output quality.
 - **5. Open-source release:** complete the setup and deployment guides and document remaining production requirements.
 
-The repository can be cloned to review and contribute to the design. There is no application to run yet; setup and usage instructions will be added as each stage is completed.
+The repository can be cloned to review and contribute to the design. There is no application to run yet. Developers can follow the [OpenAI connection check](docs/openai-setup.md) for Stage 2; it does not require a real resume.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Licensed under the [MIT License](LICENSE).

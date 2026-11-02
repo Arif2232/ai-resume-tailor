@@ -30,4 +30,4 @@ Add authentication and per-user authorization, tenant isolation, HTTPS, abuse an
 
 ## Reporting concerns
 
-Never include a real resume, API key, or other sensitive data in a public issue. If GitHub private vulnerability reporting is available, use it; otherwise ask the maintainers for a private reporting channel before sharing details.
+Never include a real resume, API key, or other sensitive data in a public issue. The repository has private vulnerability reporting enabled; use the process in [SECURITY.md](../SECURITY.md).
