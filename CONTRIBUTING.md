@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping build AI Resume Tailor. The project is in its planning stage; review the README and architecture notes before proposing a change.
+Thanks for helping build AI Resume Tailor. The project is at an early local-release stage; review the README and architecture notes before proposing a change.
 
 1. Open an issue to discuss a substantial change or an uncertain design.
 2. Fork the repository, create a branch, and keep each change focused.

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="app-token" content="__APP_TOKEN__">
+  <meta name="theme-color" content="#f5f4ee">
+  <title>AI Resume Tailor</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">✳</span><span>Resume Tailor</span></a>
+    <a class="top-link" href="https://github.com/Arif2232/ai-resume-tailor" target="_blank" rel="noopener noreferrer">Open source <span aria-hidden="true">↗</span></a>
+  </header>
+  <main class="page">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow"><span aria-hidden="true">✦</span> YOUR EXPERIENCE, IN FOCUS</p>
+        <h1 id="page-title">A resume that fits.<br><em>Still yours.</em></h1>
+        <p class="intro-copy">Bring your resume and a job description. We’ll help you highlight the experience that matters, with every change ready for your review.</p>
+      </div>
+      <div class="intro-note"><span class="note-icon" aria-hidden="true">↗</span><p><strong>Thoughtful, not invented.</strong><br>Your experience stays yours. Suggestions need your confirmation.</p></div>
+    </section>
+
+    <div class="workspace">
+      <form id="setup" class="inputs" novalidate>
+        <section class="card" aria-labelledby="resume-heading">
+          <div class="card-heading"><span class="step">01</span><div><h2 id="resume-heading">Your resume</h2><p>Start with what you’ve already done.</p></div></div>
+          <label class="upload" for="resume-file"><span class="upload-icon" aria-hidden="true">↑</span><span><strong>Choose your resume</strong><small>PDF or DOCX · up to 5 MB</small></span><span class="upload-action">Choose file</span></label>
+          <input id="resume-file" class="file-input" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" aria-describedby="resume-help">
+          <p id="resume-help" class="hint">Text-based files work best. You can also paste your resume below.</p>
+          <p id="resume-status" class="feedback" role="status" hidden></p>
+          <label for="resume-text">Review your resume text <span class="optional">editable</span></label>
+          <textarea id="resume-text" rows="8" maxlength="50000" minlength="20" required placeholder="Your extracted resume will appear here, or paste it yourself."></textarea>
+        </section>
+
+        <section class="card" aria-labelledby="job-heading">
+          <div class="card-heading"><span class="step">02</span><div><h2 id="job-heading">The opportunity</h2><p>Give the AI something specific to work with.</p></div></div>
+          <label for="job-text">Job description</label>
+          <textarea id="job-text" rows="8" maxlength="30000" minlength="50" required placeholder="Paste the role, responsibilities, and requirements here."></textarea>
+          <details class="import-details"><summary>Or import from a job link</summary><div class="import-body"><label for="job-url">Public job URL</label><div class="inline-input"><input id="job-url" type="text" inputmode="url" maxlength="4096" placeholder="https://example.com/job"><button id="import-job" type="button" class="button secondary">Import</button></div><small>Some sites require sign-in or block automated access. You can always paste the text.</small><p id="job-status" class="feedback" role="status" hidden></p></div></details>
+        </section>
+
+        <section class="card" aria-labelledby="ai-heading">
+          <div class="card-heading"><span class="step">03</span><div><h2 id="ai-heading">Your AI connection</h2><p>Choose a provider and use your own key.</p></div></div>
+          <div class="fields two">
+            <div><label for="provider">Provider</label><select id="provider" required><option value="">Loading providers…</option></select></div>
+            <div><label for="model">Model</label><select id="model" required><option value="">Choose a provider</option></select></div>
+          </div>
+          <div id="custom-model-wrap" hidden><label for="custom-model">Other model ID</label><input id="custom-model" maxlength="128" disabled placeholder="Enter a model ID"></div>
+          <div id="workspace-wrap" hidden><label for="workspace-id">Claude workspace ID <span class="optional">only if your key requires it</span></label><input id="workspace-id" maxlength="128" disabled placeholder="Optional workspace ID"></div>
+          <p id="provider-note" class="hint"></p>
+          <label for="api-key">API key</label>
+          <div class="key-field"><input id="api-key" type="password" required minlength="12" maxlength="500" autocomplete="off" spellcheck="false" placeholder="Paste your provider’s API key"><button id="toggle-key" type="button" aria-label="Show API key" aria-pressed="false">Show</button></div>
+          <p class="hint"><a id="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a> · Your key stays in this tab and is not saved by the app.</p>
+          <div class="connection-row"><button id="test-provider" type="button" class="button secondary">Test connection</button><span>Optional · sends a small test request</span></div>
+          <p id="connection-status" class="feedback" role="status" hidden></p>
+          <label class="consent"><input id="consent" type="checkbox" required><span id="consent-text">I agree to send my resume text and job description to the selected AI provider. API charges and provider data terms may apply.</span></label>
+          <button id="generate" class="button primary" type="submit">Tailor my resume <span aria-hidden="true">↗</span></button>
+          <p id="generate-status" class="feedback" role="status" hidden></p>
+        </section>
+      </form>
+
+      <aside class="results" aria-labelledby="result-heading">
+        <section class="result-card">
+          <div class="result-heading"><div><p class="eyebrow">YOUR WORKSPACE</p><h2 id="result-heading">Your tailored resume</h2></div><span id="result-badge" class="badge">Not started</span></div>
+          <div id="empty-result" class="empty-result"><span class="empty-icon" aria-hidden="true">✧</span><h3>Made for your next move</h3><p>Your editable resume, change explanations, and suggestions will appear here.</p></div>
+          <div id="result-content" hidden>
+            <p class="review-note">AI can make mistakes. Review every claim, date, and skill before using your resume.</p>
+            <label for="tailored-text">Review and edit</label>
+            <textarea id="tailored-text" rows="18" maxlength="50000"></textarea>
+            <div id="suggestions-wrap" class="result-section" hidden><h3>Skills to consider</h3><p>Only select skills you actually have. They are not added automatically.</p><div id="suggestions"></div><button id="add-skills" type="button" class="button secondary">Add confirmed skills</button></div>
+            <div class="result-section"><h3>What changed</h3><p>These explanations describe the initial AI draft; your edits won’t update them.</p><ol id="changes" class="changes"></ol></div>
+            <div class="result-section"><h3>How it aligns</h3><p>Compare the initial draft with the job’s requirements.</p><ul id="alignment" class="changes"></ul></div>
+            <details class="evidence"><summary>View source evidence for each line</summary><div id="evidence"></div></details>
+            <label class="consent verify"><input id="confirm" type="checkbox"><span>I have reviewed the resume and confirm that its claims, dates, and skills are accurate.</span></label>
+            <div class="export-actions"><button id="copy" type="button" class="button secondary" disabled>Copy text</button><button id="download-pdf" type="button" class="button primary" disabled>Download PDF</button><button id="download-docx" type="button" class="button secondary" disabled>Download Word</button></div>
+            <p class="hint">PDF currently supports common left-to-right scripts. For other scripts, use Word.</p>
+            <p id="export-status" class="feedback" role="status" hidden></p>
+          </div>
+        </section>
+        <div class="privacy-card"><span aria-hidden="true">⌁</span><p><strong>Private by design.</strong><br>Your inputs stay on this computer until you choose to send them to an AI provider. Provider terms and charges apply.</p></div>
+      </aside>
+    </div>
+    <footer><span>Made for the next chapter.</span><span>✳</span></footer>
+  </main>
+</body>
+</html>

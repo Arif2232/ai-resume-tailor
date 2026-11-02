@@ -1,6 +1,6 @@
 # Stage 2: check OpenAI
 
-This is a developer connection check, not the resume application. The planned app will let each user select a provider and enter their own key. OpenAI is the first provider being verified; Gemini and Claude remain planned until independently tested.
+This is a developer connection check, separate from the resume application. Each app user selects a provider and enters their own key. A user reported successful synthetic OpenAI and Gemini connection checks; Claude has not been live-verified.
 
 ## What you need
 
@@ -35,9 +35,9 @@ For safety, the check refuses to run if `OPENAI_CUSTOM_HEADERS` is set. Unset it
 For automated offline tests on macOS or Linux, run:
 
 ```sh
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q tests/test_verify_openai.py tests/test_verify_provider.py
 ```
 
-On Windows, use `.venv\Scripts\python.exe -m pytest -q`.
+On Windows, use `.venv\Scripts\python.exe -m pytest -q tests/test_verify_openai.py tests/test_verify_provider.py`.
 
-Those tests use fake credentials and mocked responses. A passing offline suite does not verify a real API key, model access, or billing. The first live check must succeed before Stage 3 starts.
+Those tests use fake credentials and mocked responses. A passing offline suite does not verify a real API key, model access, billing, or the full tailoring workflow.
