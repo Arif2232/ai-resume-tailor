@@ -9,6 +9,8 @@
 venv/
 *.pem
 *.key
+connection.json
+.settings-*
 
 # Private user data and generated output
 .local/

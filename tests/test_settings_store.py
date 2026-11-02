@@ -1,74 +1,98 @@
-import base64
 import json
 import os
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from resume_tailor import server, settings_store
 
 
-def envelope():
-    encode = lambda value: base64.b64encode(value).decode('ascii')
-    return {'version':1,'kdf':'PBKDF2-SHA256','iterations':600000,
-            'salt':encode(b's' * 16),'iv':encode(b'i' * 12),'ciphertext':encode(b'ciphertext-only' * 3)}
+SETTINGS = {'provider':'openai', 'model':'gpt-6.1-terra', 'api_key':'dummy-key-never-real', 'workspace_id':''}
+HEADERS = {'X-App-Token':server.TOKEN}
+RESUME = 'Avery Example\nEngineer at ExampleCo, 2020 to 2024\nBuilt reliable Java services.'
+JOB = 'Backend engineer needed to build Java services. Python is a preferred skill.'
 
 
-def test_only_encrypted_settings_are_saved_and_removable(tmp_path, monkeypatch):
-    path = tmp_path / 'config' / 'settings.json'
+def test_saved_key_stays_on_disk_and_is_never_returned_to_browser(tmp_path, monkeypatch):
+    path = tmp_path / 'config' / 'connection.json'
     monkeypatch.setattr(settings_store, 'SETTINGS_PATH', path)
-    settings = {'provider':'openai','model':'gpt-6.1-terra','api_key':'dummy-key-never-real','workspace_id':''}
-    proof = server.make_verification('openai', settings['api_key'], settings['model'], '')
-    headers = {'X-App-Token':server.TOKEN}
-    data = settings | {'verification':proof, 'encrypted':envelope()}
+    proof = server.make_verification(SETTINGS['provider'], SETTINGS['api_key'], SETTINGS['model'], '')
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
         assert client.get('/api/settings').status_code == 403
-        assert client.put('/api/settings', headers=headers, json=data | {'verification':'invalid'}).status_code == 400
+        assert client.put('/api/settings', headers=HEADERS, json=SETTINGS | {'verification':'invalid'}).status_code == 400
         assert not path.exists()
-        assert client.put('/api/settings', headers=headers, json=data).status_code == 200
-        saved = client.get('/api/settings', headers=headers).json()
-        assert saved == {'saved':True,'encrypted':envelope()}
-        assert 'dummy-key-never-real' not in path.read_text() and 'dummy-key-never-real' not in json.dumps(saved)
-        if os.name != 'nt': assert path.stat().st_mode & 0o777 == 0o600
+        assert client.put('/api/settings', headers=HEADERS, json=SETTINGS | {'verification':proof}).status_code == 200
+        response = client.get('/api/settings', headers=HEADERS)
+        assert response.json() == {'saved':True, 'settings':{'provider':'openai', 'model':'gpt-6.1-terra', 'workspace_id':''}, 'legacy':False}
+        assert 'dummy-key-never-real' not in response.text
+        assert json.loads(path.read_text())['api_key'] == SETTINGS['api_key']
+        assert 'dummy-key-never-real' not in repr(settings_store.load_settings())
+        if os.name != 'nt':
+            assert path.stat().st_mode & 0o777 == 0o600
         assert client.delete('/api/settings').status_code == 403
-        assert client.delete('/api/settings', headers=headers).status_code == 200
-        assert client.get('/api/settings', headers=headers).json() == {'saved':False}
+        assert client.delete('/api/settings', headers=HEADERS).status_code == 200
+        assert client.get('/api/settings', headers=HEADERS).json() == {'saved':False, 'legacy':False}
     assert not path.exists()
 
 
-@pytest.mark.parametrize('field,value', [('salt','bad'), ('iv','bad'), ('ciphertext','bad'), ('iterations',1),
-                                         ('version',2), ('version',True), ('version',1.0)])
-def test_rejects_invalid_encrypted_envelope_without_writing(tmp_path, monkeypatch, field, value):
-    path = tmp_path / 'settings.json'
-    monkeypatch.setattr(settings_store, 'SETTINGS_PATH', path)
-    settings = {'provider':'openai','model':'gpt-6.1-terra','api_key':'dummy-key-never-real','workspace_id':''}
-    proof = server.make_verification('openai', settings['api_key'], settings['model'], '')
-    bad = envelope() | {field:value}
+def test_saved_key_requires_a_successful_test_and_old_proofs_stop_working(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings_store, 'SETTINGS_PATH', tmp_path / 'connection.json')
+    settings_store.save_settings(settings_store.SavedSettings.model_validate(SETTINGS))
+    calls = []
+    async def fake_check(provider, key, model, **kwargs):
+        calls.append(('check', key))
+    async def fake_tailor(provider, key, model, resume, job, **kwargs):
+        calls.append(('tailor', key))
+        from resume_tailor.proposals import validate_proposal
+        return validate_proposal({'sections':[{'heading':'Experience','lines':[{'text':'Built reliable Java services.', 'evidence':['Built reliable Java services.']}]}],
+                                  'changes':[], 'alignment':[], 'suggestions':[]}, resume, job)
+    monkeypatch.setattr(server.providers, 'check_connection', fake_check)
+    monkeypatch.setattr(server.providers, 'tailor', fake_tailor)
+    selection = {'provider':'openai', 'model':'gpt-6.1-terra', 'workspace_id':'', 'use_saved':True}
+    form = selection | {'resume':RESUME, 'job_description':JOB, 'consent':True}
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
-        response = client.put('/api/settings', headers={'X-App-Token':server.TOKEN},
-                              json=settings | {'verification':proof,'encrypted':bad})
-    assert response.status_code == 400 and not path.exists()
+        assert client.post('/api/tailor', headers=HEADERS, json=form).status_code == 400
+        result = client.post('/api/test-provider', headers=HEADERS, json=selection)
+        assert result.status_code == 200 and SETTINGS['api_key'] not in result.text
+        proof = result.json()['verification']
+        assert client.post('/api/tailor', headers=HEADERS, json=form | {'verification':proof}).status_code == 200
+        settings_store.save_settings(settings_store.SavedSettings.model_validate(SETTINGS | {'api_key':'different-dummy-key'}))
+        assert client.post('/api/tailor', headers=HEADERS, json=form | {'verification':proof}).status_code == 400
+        assert client.post('/api/test-provider', headers=HEADERS, json=selection | {'provider':'gemini'}).status_code == 400
+    assert calls == [('check', SETTINGS['api_key']), ('tailor', SETTINGS['api_key'])]
 
 
-def test_failed_replacement_preserves_the_existing_vault(tmp_path, monkeypatch):
-    path = tmp_path / 'settings.json'
+@pytest.mark.parametrize('field,value', [('provider','unknown'), ('api_key','short'), ('model','bad model'),
+                                         ('workspace_id','not-allowed-for-openai')])
+def test_rejects_invalid_saved_settings(field, value):
+    with pytest.raises(ValidationError):
+        settings_store.SavedSettings.model_validate(SETTINGS | {field:value})
+
+
+def test_failed_replacement_preserves_the_existing_settings(tmp_path, monkeypatch):
+    path = tmp_path / 'connection.json'
     monkeypatch.setattr(settings_store, 'SETTINGS_PATH', path)
-    settings_store.save_settings(settings_store.EncryptedSettings.model_validate(envelope()))
+    settings_store.save_settings(settings_store.SavedSettings.model_validate(SETTINGS))
     original = path.read_bytes()
-    def fail(*args, **kwargs): raise OSError('example failure')
+    def fail(*args, **kwargs):
+        raise OSError('example failure')
     monkeypatch.setattr(settings_store.os, 'replace', fail)
     with pytest.raises(settings_store.SettingsStoreError):
-        settings_store.save_settings(settings_store.EncryptedSettings.model_validate(envelope()))
+        settings_store.save_settings(settings_store.SavedSettings.model_validate(SETTINGS))
     assert path.read_bytes() == original
     assert list(tmp_path.iterdir()) == [path]
 
 
-def test_corrupt_settings_can_be_forgotten(tmp_path, monkeypatch):
-    path = tmp_path / 'settings.json'
-    path.write_text('not a settings file')
+def test_legacy_encrypted_file_is_preserved_and_corrupt_settings_can_be_forgotten(tmp_path, monkeypatch):
+    path = tmp_path / 'connection.json'
+    legacy = tmp_path / 'settings.json'
+    legacy.write_text('previous encrypted settings')
     monkeypatch.setattr(settings_store, 'SETTINGS_PATH', path)
-    headers = {'X-App-Token':server.TOKEN}
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
-        assert client.get('/api/settings', headers=headers).json() == {'saved':True, 'corrupt':True}
-        assert client.delete('/api/settings', headers=headers).status_code == 200
-        assert client.get('/api/settings', headers=headers).json() == {'saved':False}
+        assert client.get('/api/settings', headers=HEADERS).json() == {'saved':False, 'legacy':True}
+        path.write_text('not a settings file')
+        assert client.get('/api/settings', headers=HEADERS).json() == {'saved':True, 'corrupt':True, 'legacy':True}
+        assert client.delete('/api/settings', headers=HEADERS).status_code == 200
+        assert client.get('/api/settings', headers=HEADERS).json() == {'saved':False, 'legacy':True}
+    assert legacy.read_text() == 'previous encrypted settings'

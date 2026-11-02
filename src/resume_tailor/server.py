@@ -1,4 +1,4 @@
-"""Local-only HTTP interface; documents stay in memory and saved keys are encrypted."""
+"""Local-only HTTP interface; documents stay in memory and keys can be saved locally."""
 
 import asyncio
 import hashlib
@@ -35,8 +35,9 @@ class StrictInput(BaseModel):
 class ProviderInput(StrictInput):
     provider: Literal['openai', 'gemini', 'claude']
     model: str = Field(default='', max_length=128)
-    api_key: SecretStr
+    api_key: SecretStr = SecretStr('')
     workspace_id: str = Field(default='', max_length=128)
+    use_saved: bool = False
 
 
 class VerifiedProviderInput(ProviderInput):
@@ -67,10 +68,6 @@ class ExportInput(StrictInput):
     confirmed: bool = False
 
 
-class SaveSettingsInput(VerifiedProviderInput):
-    encrypted: settings_store.EncryptedSettings
-
-
 def verify_token(value: str | None):
     if not value or len(value) > 128 or not value.isascii() or not hmac.compare_digest(value, TOKEN):
         raise HTTPException(status_code=403, detail='Refresh the page and try again.')
@@ -82,9 +79,24 @@ def make_verification(provider: str, key: str, model: str, workspace_id: str) ->
     return hmac.new(VERIFICATION_SECRET, payload, hashlib.sha256).hexdigest()
 
 
-def verify_connection(data: VerifiedProviderInput):
+async def resolve_key(data: ProviderInput) -> str:
+    key = data.api_key.get_secret_value()
+    if not data.use_saved:
+        return key
+    if key:
+        raise HTTPException(status_code=400, detail='Choose either the saved key or a new key.')
     try:
-        expected = make_verification(data.provider, data.api_key.get_secret_value(), data.model, data.workspace_id)
+        saved = await asyncio.to_thread(settings_store.load_settings)
+    except settings_store.SettingsStoreError as exc:
+        raise HTTPException(status_code=400, detail='Test this AI connection again. Saved settings could not be read.') from exc
+    if not saved or saved.provider != data.provider:
+        raise HTTPException(status_code=400, detail='Test this AI connection again. The saved key is unavailable.')
+    return saved.api_key.get_secret_value()
+
+
+def verify_connection(data: VerifiedProviderInput, key: str):
+    try:
+        expected = make_verification(data.provider, key, data.model, data.workspace_id)
     except providers.ProviderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not re.fullmatch(r'[0-9a-f]{64}', data.verification) or not hmac.compare_digest(data.verification, expected):
@@ -160,12 +172,13 @@ async def import_job(data: JobInput, x_app_token: str | None = Header(default=No
 @app.post('/api/test-provider')
 async def test_provider(data: ProviderInput, x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
+    key = await resolve_key(data)
     try:
         async with AI_SLOTS:
-            await providers.check_connection(data.provider, data.api_key.get_secret_value(), data.model,
+            await providers.check_connection(data.provider, key, data.model,
                                              workspace_id=data.workspace_id)
         return {'message': 'Connected. You can save these settings.',
-                'verification': make_verification(data.provider, data.api_key.get_secret_value(), data.model, data.workspace_id)}
+                'verification': make_verification(data.provider, key, data.model, data.workspace_id)}
     except providers.ProviderError as exc:
         raise HTTPException(status_code=400, detail='Connection failed. ' + str(exc)) from exc
 
@@ -173,19 +186,23 @@ async def test_provider(data: ProviderInput, x_app_token: str | None = Header(de
 @app.get('/api/settings')
 async def get_settings(x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
+    legacy = await asyncio.to_thread(settings_store.legacy_settings_exist)
     try:
-        encrypted = await asyncio.to_thread(settings_store.load_settings)
-        return {'saved': True, 'encrypted': encrypted.model_dump()} if encrypted else {'saved': False}
+        saved = await asyncio.to_thread(settings_store.load_settings)
+        return {'saved': True, 'settings': saved.model_dump(exclude={'api_key'}), 'legacy': legacy} if saved else {'saved': False, 'legacy': legacy}
     except settings_store.SettingsStoreError:
-        return {'saved': True, 'corrupt': True}
+        return {'saved': True, 'corrupt': True, 'legacy': legacy}
 
 
 @app.put('/api/settings')
-async def save_settings(data: SaveSettingsInput, x_app_token: str | None = Header(default=None)):
+async def save_settings(data: VerifiedProviderInput, x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
-    verify_connection(data)
+    key = await resolve_key(data)
+    verify_connection(data, key)
     try:
-        await asyncio.to_thread(settings_store.save_settings, data.encrypted)
+        key, model, workspace_id = providers.selected_settings(data.provider, key, data.model, data.workspace_id)
+        saved = settings_store.SavedSettings(provider=data.provider, model=model, api_key=key, workspace_id=workspace_id)
+        await asyncio.to_thread(settings_store.save_settings, saved)
         return {'saved': True}
     except settings_store.SettingsStoreError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -208,10 +225,11 @@ async def tailor_resume(data: TailorInput, x_app_token: str | None = Header(defa
         raise HTTPException(status_code=400, detail='Confirm before sending your resume to the selected AI provider.')
     if len(data.resume) < 20 or len(data.job_description) < 50:
         raise HTTPException(status_code=400, detail='Add a resume and a job description with enough detail.')
-    verify_connection(data)
+    key = await resolve_key(data)
+    verify_connection(data, key)
     try:
         async with AI_SLOTS:
-            result = await providers.tailor(data.provider, data.api_key.get_secret_value(), data.model,
+            result = await providers.tailor(data.provider, key, data.model,
                                             data.resume, data.job_description, workspace_id=data.workspace_id)
         return {'resume': result.resume_text(), 'sections': [section.model_dump() for section in result.sections],
                 'changes': [change.model_dump() for change in result.changes],

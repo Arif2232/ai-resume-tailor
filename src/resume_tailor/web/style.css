@@ -64,6 +64,7 @@ summary { cursor: pointer; color: #315f48; font-size: 12px; font-weight: 750; }
 .connection-summary strong, .connection-summary small { display: block; }
 .connection-summary strong { color: #2e5140; font-size: 12px; }
 .connection-summary small { margin-top: 4px; color: #61766b; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.connection-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 dialog { width: min(560px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; border: 1px solid #dce7dd; border-radius: 18px; padding: 20px; box-shadow: 0 20px 60px #173e2d33; }
 dialog::backdrop { background: #102e2073; }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 14px; }

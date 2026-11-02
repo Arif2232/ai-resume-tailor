@@ -42,21 +42,21 @@ py -3 -m venv .venv
 ```
 
 4. The app opens in your browser. Keep the terminal open. If it does not open automatically, use the local address printed in the terminal.
-5. Select **AI settings**, choose a provider and model, enter your API key, and select **Test connection**. Once it succeeds, create a settings password and select **Save and continue**. To keep the key only until the tab closes, uncheck the encrypted-save option instead.
+5. Select **AI settings**, choose a provider and model, enter your API key, and select **Test connection**. Once it succeeds, select **Save and continue**. To keep the key only until the tab closes, uncheck the save option instead.
 6. Upload a resume or paste its text, add a job description or link, review the data-sharing notice, and select **Tailor my resume**.
 7. Check the draft and its evidence. Add only suggestions you actually have, edit as needed, and confirm the details before copying or downloading.
 8. Press **Ctrl+C** in the terminal to stop the app.
 
-When you reopen the app, open **AI settings** and use your password to **Unlock and test** the saved connection. You can also change it or forget it there. The password cannot be recovered. Testing is required before tailoring; it sends a small synthetic request, may incur a charge, and does not send your resume. See the [provider setup guide](docs/provider-setup.md) for independent checks.
+When you reopen or refresh the app, select **Test connection** beside the saved connection. You can change or forget it in **AI settings**. Testing is required before tailoring; it sends a small synthetic request, may incur a charge, and does not send your resume. See the [provider setup guide](docs/provider-setup.md) for independent checks.
 
 ## Limits and privacy
 
-- If you choose to save your connection, the browser encrypts your API key with your settings password before storing it in a local settings file. The password is not saved or sent to the server. The app does not use an operating-system keychain. A strong, unique password helps protect the saved key; software with access to your browser while the key is unlocked may still see it.
+- If you choose to save your connection, the API key is stored **unencrypted** in a local configuration file. Anyone or any software with access to that file can use it. On macOS and Linux, the file is created with owner-only permissions; Windows uses its inherited folder permissions. The app does not use an operating-system keychain and does not send the saved key back to the browser.
 - Your resume and job text stay on your computer until you choose to send them to the selected AI provider. Provider retention and training terms differ. Gemini's free-tier terms may allow content to be used to improve products; check your plan before sending personal information.
 - Scanned/image-only PDFs need a text version. Complex PDF layouts and Word features such as tracked changes may not extract perfectly; review the extracted text.
 - Job sites that require sign-in, use scripts to display content, or block automated access may not import. Paste the description instead.
 - PDF export currently supports common left-to-right scripts with the bundled font. If characters cannot be rendered safely, use the Word export. Review both the content and final layout.
-- The local service has no multi-user authentication. Do not expose it directly to the internet; see the [deployment plan](docs/deployment.md).
+- The local service has no multi-user authentication. Other local users or processes may be able to use it while it is running. Do not expose it directly to the internet; see the [deployment plan](docs/deployment.md).
 
 ## Development
 

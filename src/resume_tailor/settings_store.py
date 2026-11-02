@@ -1,7 +1,5 @@
-"""Store only a browser-encrypted settings envelope, never a plaintext key."""
+"""Store the user's opted-in provider settings in a local file."""
 
-import base64
-import binascii
 import json
 import os
 import stat
@@ -10,10 +8,12 @@ from pathlib import Path
 from typing import Literal
 
 from platformdirs import user_config_path
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+
+from resume_tailor import providers
 
 SETTINGS_DIR = Path(os.environ.get('RESUME_TAILOR_CONFIG_DIR') or user_config_path('ai-resume-tailor', appauthor=False))
-SETTINGS_PATH = SETTINGS_DIR / 'settings.json'
+SETTINGS_PATH = SETTINGS_DIR / 'connection.json'
 MAX_SETTINGS_BYTES = 10_000
 
 
@@ -21,36 +21,27 @@ class SettingsStoreError(ValueError):
     pass
 
 
-class EncryptedSettings(BaseModel):
+class SavedSettings(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    version: Literal[1]
-    kdf: Literal['PBKDF2-SHA256']
-    iterations: Literal[600000]
-    salt: str
-    iv: str
-    ciphertext: str
-
-    @field_validator('version', 'iterations', mode='before')
-    @classmethod
-    def require_integer(cls, value):
-        if type(value) is not int:
-            raise ValueError('Invalid encrypted settings.')
-        return value
+    provider: Literal['openai', 'gemini', 'claude']
+    model: str = Field(max_length=128)
+    api_key: SecretStr
+    workspace_id: str = Field(max_length=128)
 
     @model_validator(mode='after')
-    def validate_envelope(self):
+    def validate_settings(self):
         try:
-            decoded = [base64.b64decode(value, validate=True) for value in (self.salt, self.iv, self.ciphertext)]
-            if any(base64.b64encode(item).decode('ascii') != value for item, value in zip(decoded, (self.salt, self.iv, self.ciphertext))):
-                raise ValueError('Non-canonical base64')
-        except (ValueError, binascii.Error) as exc:
-            raise ValueError('Invalid encrypted settings.') from exc
-        if len(decoded[0]) != 16 or len(decoded[1]) != 12 or not 16 <= len(decoded[2]) <= 4096:
-            raise ValueError('Invalid encrypted settings.')
+            providers.selected_settings(self.provider, self.api_key.get_secret_value(), self.model, self.workspace_id)
+        except providers.ProviderError as exc:
+            raise ValueError('Invalid saved settings.') from exc
         return self
 
 
-def load_settings() -> EncryptedSettings | None:
+def legacy_settings_exist() -> bool:
+    return (SETTINGS_PATH.parent / 'settings.json').is_file()
+
+
+def load_settings() -> SavedSettings | None:
     try:
         if SETTINGS_PATH.is_symlink():
             raise SettingsStoreError('Saved settings cannot be read. Remove them and connect again.')
@@ -63,7 +54,7 @@ def load_settings() -> EncryptedSettings | None:
             raw = handle.read(MAX_SETTINGS_BYTES + 1)
             if len(raw) > MAX_SETTINGS_BYTES:
                 raise SettingsStoreError('Saved settings cannot be read. Remove them and connect again.')
-        return EncryptedSettings.model_validate_json(raw)
+        return SavedSettings.model_validate_json(raw)
     except FileNotFoundError:
         return None
     except SettingsStoreError:
@@ -72,7 +63,7 @@ def load_settings() -> EncryptedSettings | None:
         raise SettingsStoreError('Saved settings cannot be read. Remove them and connect again.') from exc
 
 
-def save_settings(encrypted: EncryptedSettings):
+def save_settings(settings: SavedSettings):
     temporary = None
     try:
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -81,12 +72,14 @@ def save_settings(encrypted: EncryptedSettings):
         with os.fdopen(fd, 'w', encoding='utf-8') as handle:
             if os.name != 'nt':
                 os.fchmod(handle.fileno(), 0o600)
-            json.dump(encrypted.model_dump(), handle, separators=(',', ':'))
+            data = settings.model_dump(exclude={'api_key'})
+            data['api_key'] = settings.api_key.get_secret_value()
+            json.dump(data, handle, separators=(',', ':'))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, SETTINGS_PATH)
     except OSError as exc:
-        raise SettingsStoreError('Could not save encrypted settings. Check local file permissions.') from exc
+        raise SettingsStoreError('Could not save settings. Check local file permissions.') from exc
     finally:
         if temporary is not None:
             try:

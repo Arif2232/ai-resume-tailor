@@ -23,8 +23,16 @@ def example_pdf():
 
 
 async def test_browser_flow_reviews_suggestions_and_exports_without_real_ai(tmp_path, monkeypatch):
-    vault = tmp_path / 'config' / 'settings.json'
-    monkeypatch.setattr(settings_store, 'SETTINGS_PATH', vault)
+    saved_file = tmp_path / 'config' / 'connection.json'
+    monkeypatch.setattr(settings_store, 'SETTINGS_PATH', saved_file)
+    checks = []
+    fail_next = [False]
+    async def fake_check(provider, key, model, **kwargs):
+        checks.append({'provider':provider, 'api_key':key, 'model':model, **kwargs})
+        if len(checks) == 1 or fail_next[0]:
+            fail_next[0] = False
+            raise application.providers.ProviderError('Check the key.')
+    monkeypatch.setattr(application.providers, 'check_connection', fake_check)
     listener = socket.socket()
     listener.bind(('127.0.0.1', 0))
     listener.listen(32)
@@ -49,22 +57,10 @@ async def test_browser_flow_reviews_suggestions_and_exports_without_real_ai(tmp_
             assert 'Avery Example' in await page.locator('#resume-text').input_value()
             await page.locator('#job-text').fill('Backend engineer needed to build Java services. Python is a preferred skill.')
             await page.locator('#open-settings').click()
+            assert await page.locator('#save-password, #confirm-password, #unlock-password').count() == 0
             await page.select_option('#provider', 'gemini')
             await expect(page.locator('#provider-note')).to_contain_text('free-tier')
             await page.locator('#api-key').fill('dummy-key-never-real')
-            checks = []
-            fail_next = [False]
-            async def fake_check(route):
-                data = json.loads(route.request.post_data)
-                checks.append(data)
-                if len(checks) == 1 or fail_next[0]:
-                    fail_next[0] = False
-                    await route.fulfill(status=400, content_type='application/json', body='{"detail":"Connection failed. Check the key."}')
-                else:
-                    proof = application.make_verification(data['provider'], data['api_key'], data['model'], data['workspace_id'])
-                    await route.fulfill(status=200, content_type='application/json',
-                                        body=json.dumps({'message':'Connected. You can save these settings.','verification':proof}))
-            await page.route('**/api/test-provider', fake_check)
             async with page.expect_response('**/api/test-provider'):
                 await page.locator('#test-provider').click()
             await expect(page.locator('#connection-status')).to_contain_text('Connection failed')
@@ -79,37 +75,28 @@ async def test_browser_flow_reviews_suggestions_and_exports_without_real_ai(tmp_
             await page.locator('#api-key').fill('dummy-key-never-real')
             await page.locator('#test-provider').click()
             await expect(page.locator('#save-settings')).to_be_enabled()
-            await page.locator('#save-password').fill('dummy-passphrase-123')
-            await page.locator('#confirm-password').fill('dummy-passphrase-123')
-            async def inspect_save(route):
-                if route.request.method == 'PUT':
-                    data = json.loads(route.request.post_data)
-                    assert 'dummy-passphrase-123' not in route.request.post_data
-                    assert 'dummy-key-never-real' not in json.dumps(data['encrypted'])
-                await route.continue_()
-            await page.route('**/api/settings', inspect_save)
             stale = await browser.new_page()
-            await stale.route('**/api/test-provider', fake_check)
             async with stale.expect_response('**/api/settings'):
                 await stale.goto(f'http://127.0.0.1:{port}/')
             await page.locator('#save-settings').click()
             await expect(page.locator('#settings-dialog')).not_to_be_visible()
             await expect(page.locator('#active-provider')).to_have_text('Gemini connected')
             await expect(page.locator('#generate')).to_be_enabled()
-            assert vault.exists()
-            assert 'dummy-key-never-real' not in vault.read_text()
-            assert 'dummy-passphrase-123' not in vault.read_text()
-            original_vault = vault.read_bytes()
+            assert json.loads(saved_file.read_text())['api_key'] == 'dummy-key-never-real'
+            original_settings = saved_file.read_bytes()
             await stale.locator('#open-settings').click()
             await stale.locator('#api-key').fill('another-dummy-key-only')
             await stale.locator('#test-provider').click()
             await expect(stale.locator('#save-settings')).to_be_enabled()
-            await stale.locator('#save-password').fill('another-passphrase-123')
-            await stale.locator('#confirm-password').fill('another-passphrase-123')
-            stale.once('dialog', lambda dialog: dialog.dismiss())
+            refused = asyncio.Event()
+            async def refuse_replacement(dialog):
+                await dialog.dismiss()
+                refused.set()
+            stale.once('dialog', refuse_replacement)
             await stale.locator('#save-settings').click()
+            await asyncio.wait_for(refused.wait(), timeout=5)
             await expect(stale.locator('#settings-dialog')).to_be_visible()
-            assert vault.read_bytes() == original_vault
+            assert saved_file.read_bytes() == original_settings
             assert 'Avery Example' in await page.locator('#resume-text').input_value()
             await page.locator('.import-details summary').click()
             await page.locator('#job-url').fill('https://example.com/job')
@@ -138,11 +125,12 @@ async def test_browser_flow_reviews_suggestions_and_exports_without_real_ai(tmp_
                 await page.locator('#generate').click()
             await expect(page.locator('#result-badge')).to_have_text('Ready to review')
             await expect(page.locator('#generate-status')).to_contain_text('omitted')
-            assert await page.locator('#api-key').input_value() == 'dummy-key-never-real'
+            assert await page.locator('#api-key').input_value() == ''
             storage = await page.evaluate('JSON.stringify({local: {...localStorage}, session: {...sessionStorage}, cookies: document.cookie})')
-            assert 'dummy-key-never-real' not in storage and 'dummy-passphrase-123' not in storage
+            assert 'dummy-key-never-real' not in storage
             assert requests[0]['consent'] is True and 'Avery Example' in requests[0]['resume']
             assert requests[0]['verification'] == application.make_verification('gemini', 'dummy-key-never-real', requests[0]['model'], '')
+            assert requests[0]['use_saved'] is True and 'api_key' not in requests[0]
             assert 'Python' not in await page.locator('#tailored-text').input_value()
             await expect(page.locator('#download-pdf')).to_be_disabled()
             await page.get_by_label('I have Python').check()
@@ -162,7 +150,8 @@ async def test_browser_flow_reviews_suggestions_and_exports_without_real_ai(tmp_
             await page.locator('#tailored-text').fill('Avery Example\n\nA reviewed and edited resume for the role.')
             await expect(page.locator('#download-pdf')).to_be_disabled()
             await page.locator('#open-settings').click()
-            assert await page.locator('#api-key').input_value() == 'dummy-key-never-real'
+            assert await page.locator('#api-key').input_value() == ''
+            assert 'saved key' in await page.locator('#api-key').get_attribute('placeholder')
             await page.locator('#toggle-key').click()
             assert await page.locator('#api-key').get_attribute('type') == 'text'
             await page.select_option('#provider', 'openai')
@@ -172,46 +161,73 @@ async def test_browser_flow_reviews_suggestions_and_exports_without_real_ai(tmp_
             await page.locator('#cancel-settings').click()
             await expect(page.locator('#active-provider')).to_have_text('Gemini connected')
             await page.locator('#open-settings').click()
-            assert await page.locator('#api-key').input_value() == 'dummy-key-never-real'
+            assert await page.locator('#api-key').input_value() == ''
             await page.locator('#cancel-settings').click()
             await page.set_viewport_size({'width': 375, 'height': 812})
             assert await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
 
             reopened = await browser.new_page()
-            await reopened.route('**/api/test-provider', fake_check)
+            browser_checks = []
+            async def capture_check(route):
+                browser_checks.append(json.loads(route.request.post_data))
+                await route.continue_()
+            await reopened.route('**/api/test-provider', capture_check)
             await reopened.goto(f'http://127.0.0.1:{port}/')
-            await expect(reopened.locator('#active-provider')).to_have_text('Saved connection locked')
+            await expect(reopened.locator('#active-provider')).to_have_text('Gemini saved')
             await expect(reopened.locator('#generate')).to_be_disabled()
-            await reopened.locator('#open-settings').click()
-            await expect(reopened.locator('#saved-settings')).to_be_visible()
-            before_unlock = len(checks)
-            await reopened.locator('#unlock-password').fill('incorrect-password')
-            await reopened.locator('#unlock-settings').click()
-            await expect(reopened.locator('#unlock-status')).to_contain_text('Could not unlock')
-            assert len(checks) == before_unlock
-            await reopened.locator('#unlock-password').fill('dummy-passphrase-123')
+            before_test = len(checks)
             fail_next[0] = True
-            await reopened.locator('#unlock-settings').click()
-            await expect(reopened.locator('#unlock-status')).to_contain_text('Connection failed')
+            await reopened.locator('#test-saved-connection').click()
+            await expect(reopened.locator('#generate-status')).to_contain_text('Connection failed')
             await expect(reopened.locator('#generate')).to_be_disabled()
-            assert vault.exists()
-            await reopened.locator('#unlock-settings').click()
-            await expect(reopened.locator('#settings-dialog')).not_to_be_visible()
+            assert saved_file.exists()
+            await reopened.locator('#test-saved-connection').click()
             await expect(reopened.locator('#active-provider')).to_have_text('Gemini connected')
             await expect(reopened.locator('#generate')).to_be_enabled()
-            assert len(checks) == before_unlock + 2
+            assert len(checks) == before_test + 2
             assert checks[-1]['api_key'] == 'dummy-key-never-real'
+            assert browser_checks[-1]['use_saved'] is True and 'api_key' not in browser_checks[-1]
+            await reopened.locator('#resume-text').fill('Avery Example: Built reliable Java services for customers.')
+            await reopened.locator('#job-text').fill('Backend engineer needed to build Java services. Python is a preferred skill.')
+            await reopened.locator('#consent').check()
+            async def expired_connection(route):
+                await route.fulfill(status=400, content_type='application/json', body='{"detail":"Test this AI connection before tailoring your resume."}')
+            await reopened.route('**/api/tailor', expired_connection)
+            await reopened.locator('#generate').click()
+            await expect(reopened.locator('#test-saved-connection')).to_be_visible()
+            await expect(reopened.locator('#generate')).to_be_disabled()
+            await reopened.locator('#test-saved-connection').click()
+            await expect(reopened.locator('#generate')).to_be_enabled()
             await reopened.locator('#open-settings').click()
-            assert await reopened.locator('#api-key').input_value() == 'dummy-key-never-real'
+            assert await reopened.locator('#api-key').input_value() == ''
+            await reopened.select_option('#model', 'custom')
+            await reopened.locator('#custom-model').fill('gemini-custom-model')
+            await reopened.locator('#test-provider').click()
+            await expect(reopened.locator('#save-settings')).to_be_enabled()
+            reopened.once('dialog', lambda dialog: dialog.accept())
+            await reopened.locator('#save-settings').click()
+            await expect(reopened.locator('#settings-dialog')).not_to_be_visible()
+            assert json.loads(saved_file.read_text())['model'] == 'gemini-custom-model'
+            assert json.loads(saved_file.read_text())['api_key'] == 'dummy-key-never-real'
+            await reopened.locator('#open-settings').click()
+            await reopened.locator('#api-key').fill('replacement-dummy-key')
+            await expect(reopened.locator('#save-settings')).to_be_disabled()
+            await reopened.locator('#test-provider').click()
+            await expect(reopened.locator('#save-settings')).to_be_enabled()
+            reopened.once('dialog', lambda dialog: dialog.accept())
+            await reopened.locator('#save-settings').click()
+            await expect(reopened.locator('#settings-dialog')).not_to_be_visible()
+            assert json.loads(saved_file.read_text())['api_key'] == 'replacement-dummy-key'
+            await reopened.locator('#open-settings').click()
+            assert await reopened.locator('#api-key').input_value() == ''
             reopened.once('dialog', lambda dialog: dialog.accept())
             await reopened.locator('#forget-settings').click()
             await expect(reopened.locator('#saved-settings')).not_to_be_visible()
-            assert not vault.exists()
+            assert not saved_file.exists()
             await reopened.locator('#cancel-settings').click()
-            await expect(reopened.locator('#generate')).to_be_enabled()
+            await expect(reopened.locator('#generate')).to_be_disabled()
 
             session_only = await browser.new_page()
-            await session_only.route('**/api/test-provider', fake_check)
             await session_only.goto(f'http://127.0.0.1:{port}/')
             await session_only.wait_for_selector('#provider option[value="openai"]', state='attached')
             await session_only.locator('#open-settings').click()
@@ -221,7 +237,7 @@ async def test_browser_flow_reviews_suggestions_and_exports_without_real_ai(tmp_
             await expect(session_only.locator('#save-settings')).to_be_enabled()
             await session_only.locator('#save-settings').click()
             await expect(session_only.locator('#generate')).to_be_enabled()
-            assert not vault.exists()
+            assert not saved_file.exists()
             await session_only.reload()
             await expect(session_only.locator('#generate')).to_be_disabled()
             await browser.close()

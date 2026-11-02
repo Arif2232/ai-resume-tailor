@@ -25,6 +25,6 @@ On Windows, replace `.venv/bin/python` with `.venv\Scripts\python.exe`. The defa
 
 If a Claude key can access multiple workspaces, the browser offers an optional workspace ID; the command-line check accepts it in `ANTHROPIC_WORKSPACE_ID`.
 
-The browser requires a successful connection test before tailoring and when unlocking saved settings. A successful test verifies only the selected key, model, and a small structured response; it does not establish resume quality or prove every provider feature works. Claude's integration has only been tested with mocked responses so far.
+The browser requires a successful connection test before tailoring and after reopening or refreshing the app. A successful test verifies only the selected key, model, and a small structured response; it does not establish resume quality or prove every provider feature works. Claude's integration has only been tested with mocked responses so far.
 
 Review [OpenAI data controls](https://developers.openai.com/api/docs/guides/your-data), [Gemini terms](https://ai.google.dev/gemini-api/terms), and [Claude data retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention). Gemini's free-tier terms may allow submitted content to be used to improve products.

@@ -6,7 +6,7 @@ This describes the current local implementation and the work still needed before
 
 1. The user uploads a PDF or Word resume, or pastes its text. Extraction runs in a separate bounded worker and the user can correct the result.
 2. The user pastes a job description or imports a public job URL. A failed import offers the paste fallback.
-3. In AI settings, the user chooses and tests a provider, model, and their own API key. The connection can be saved as an encrypted local file or kept only for the current tab. The user explicitly agrees before sending resume and job text to the provider.
+3. In AI settings, the user chooses and tests a provider, model, and their own API key. The connection can be saved in a local file or kept only for the current tab. The user explicitly agrees before sending resume and job text to the provider.
 4. The model proposes an editable resume, explains changes and job alignment, and cites source text. Missing skills remain separate suggestions until the user confirms them.
 5. The user reviews the result and confirms its accuracy before copying or downloading a PDF or Word file.
 
@@ -20,7 +20,7 @@ The app does not submit job applications. It aims for natural, readable writing 
 - **AI providers:** a small adapter calls fixed OpenAI, Gemini, or Claude endpoints with the user's key. It uses structured output and validates the response. OpenAI and Gemini connection checks were reported successful by a user; Claude is experimental and unverified live.
 - **Review and export:** one structured proposal drives the editable text, changes, alignment, and source evidence. [ReportLab](https://docs.reportlab.com/reportlab/userguide/ch3_fonts/) and python-docx generate PDF and Word files from the same reviewed text.
 
-Source references, schema validation, and number checks reduce some errors but cannot establish semantic truth. Users must check all claims before export. User documents are not intentionally persisted by the app; provider keys are persisted only when users choose encrypted saving. Provider data terms and charges still apply.
+Source references, schema validation, and number checks reduce some errors but cannot establish semantic truth. Users must check all claims before export. User documents are not intentionally persisted by the app; provider keys are persisted unencrypted only when users choose to save the connection. Provider data terms and charges still apply.
 
 ## Stages and verification
 
