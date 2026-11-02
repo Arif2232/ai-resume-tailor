@@ -6,6 +6,8 @@ a { color: #176c55; text-underline-offset: 3px; }
 .brand { display: inline-flex; align-items: center; gap: 11px; color: #183229; text-decoration: none; font-weight: 750; font-size: 16px; letter-spacing: -.03em; }
 .brand-mark { width: 35px; height: 35px; display: grid; place-items: center; border-radius: 11px; background: #245d48; color: #fff; font-size: 21px; }
 .top-link { font-size: 12px; font-weight: 700; text-decoration: none; color: #52695d; }
+.top-actions { display: flex; align-items: center; gap: 20px; }
+.settings-link { border: 0; padding: 8px; background: transparent; color: #315f48; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
 .page { max-width: 1200px; padding: 0 44px; margin: auto; }
 .intro { display: flex; align-items: end; justify-content: space-between; gap: 35px; padding: 58px 0 35px; }
 .eyebrow { margin: 0 0 13px; color: #486f5d; font-size: 10px; letter-spacing: .16em; font-weight: 800; }
@@ -58,6 +60,24 @@ summary { cursor: pointer; color: #315f48; font-size: 12px; font-weight: 750; }
 .import-body small { display: block; margin-top: 8px; }
 .connection-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .connection-row span { color: #61766b; font-size: 11px; line-height: 1.4; }
+.connection-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px; border: 1px solid #e1e9e0; border-radius: 10px; background: #f8fbf7; }
+.connection-summary strong, .connection-summary small { display: block; }
+.connection-summary strong { color: #2e5140; font-size: 12px; }
+.connection-summary small { margin-top: 4px; color: #61766b; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+dialog { width: min(560px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; border: 1px solid #dce7dd; border-radius: 18px; padding: 20px; box-shadow: 0 20px 60px #173e2d33; }
+dialog::backdrop { background: #102e2073; }
+.dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 14px; }
+.dialog-heading .eyebrow { margin-bottom: 7px; }
+.dialog-heading p:last-child { margin: 6px 0 0; color: #61766b; font-size: 12px; line-height: 1.5; }
+dialog label { margin-top: 10px; }
+dialog .consent { margin-top: 12px; }
+.close-settings { border: 0; border-radius: 8px; padding: 3px 8px; background: #edf5ed; color: #315f48; font-size: 22px; cursor: pointer; }
+.settings-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
+.saved-settings { margin-bottom: 20px; padding: 14px; border: 1px solid #d9e7dc; border-radius: 11px; background: #f7fbf6; }
+.saved-settings strong { font-size: 13px; color: #284c39; }
+.saved-settings p { margin: 7px 0; color: #536f5f; font-size: 12px; line-height: 1.5; }
+.button.text-button { color: #315f48; background: transparent; text-decoration: underline; text-underline-offset: 3px; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .consent { display: flex; align-items: flex-start; gap: 10px; margin: 18px 0 0; color: #43594d; font-weight: 500; line-height: 1.55; }
 .consent input { margin: 3px 0 0; accent-color: #246849; flex: 0 0 auto; }
 .feedback { margin: 10px 0 0; padding: 10px 12px; border-radius: 9px; background: #edf5ed; color: #285b42; font-size: 12px; line-height: 1.5; }

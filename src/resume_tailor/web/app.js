@@ -12,6 +12,13 @@ const customWrap = byId('custom-model-wrap');
 const apiKey = byId('api-key');
 const workspaceId = byId('workspace-id');
 const consent = byId('consent');
+const settingsDialog = byId('settings-dialog');
+const settingsForm = byId('settings-form');
+const settingsFields = byId('settings-fields');
+const rememberSettings = byId('remember-settings');
+const savePassword = byId('save-password');
+const confirmPassword = byId('confirm-password');
+const unlockPassword = byId('unlock-password');
 const generated = byId('tailored-text');
 const confirmFacts = byId('confirm');
 const exportButtons = [byId('copy'), byId('download-pdf'), byId('download-docx')];
@@ -19,6 +26,13 @@ let providers = {};
 let resumeRevision = 0;
 let jobRevision = 0;
 let settingsRevision = 0;
+let settingsDraftRevision = 0;
+let activeSettings = null;
+let pendingVerification = '';
+let generating = false;
+let settingsBusy = false;
+let savedEnvelope = null;
+let savedExists = false;
 let draftRevision = 0;
 let sourceChanged = false;
 let hasResult = false;
@@ -30,8 +44,8 @@ function feedback(element, message, error = false) {
   element.hidden = !message;
 }
 
-async function requestJson(path, data) {
-  const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-App-Token': token }, body: JSON.stringify(data) });
+async function requestJson(path, data, method = 'POST') {
+  const response = await fetch(path, { method, headers: { 'Content-Type': 'application/json', 'X-App-Token': token }, body: data === undefined ? undefined : JSON.stringify(data) });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Something went wrong. Please try again.');
   return result;
@@ -39,6 +53,50 @@ async function requestJson(path, data) {
 
 function messageFor(error) {
   return error instanceof TypeError ? 'Could not connect to the app. Check your connection and try again.' : error.message || 'Something went wrong. Please try again.';
+}
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder('utf-8', { fatal: true });
+const vaultContext = encoder.encode('ai-resume-tailor-settings:v1');
+
+function toBase64(bytes) {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes)));
+}
+
+function fromBase64(value) {
+  return Uint8Array.from(atob(value), char => char.charCodeAt(0));
+}
+
+async function vaultKey(password, salt, usage) {
+  if (!window.crypto?.subtle) throw new Error('Encrypted storage is unavailable in this browser. Use this tab only.');
+  const material = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600000 }, material,
+    { name: 'AES-GCM', length: 256 }, false, [usage]);
+}
+
+async function encryptSettings(settings, password) {
+  if (!window.crypto?.subtle) throw new Error('Encrypted storage is unavailable in this browser. Use this tab only.');
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await vaultKey(password, salt, 'encrypt');
+  const plain = encoder.encode(JSON.stringify({ provider: settings.provider, model: settings.model,
+    api_key: settings.api_key, workspace_id: settings.workspace_id }));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: vaultContext }, key, plain);
+  return { version: 1, kdf: 'PBKDF2-SHA256', iterations: 600000, salt: toBase64(salt),
+    iv: toBase64(iv), ciphertext: toBase64(ciphertext) };
+}
+
+async function decryptSettings(envelope, password) {
+  if (envelope?.version !== 1 || envelope.kdf !== 'PBKDF2-SHA256' || envelope.iterations !== 600000) throw new Error('Saved settings are not supported.');
+  const salt = fromBase64(envelope.salt);
+  const iv = fromBase64(envelope.iv);
+  if (salt.length !== 16 || iv.length !== 12) throw new Error('Saved settings are invalid.');
+  const key = await vaultKey(password, salt, 'decrypt');
+  const bytes = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: vaultContext }, key, fromBase64(envelope.ciphertext));
+  const result = JSON.parse(decoder.decode(bytes));
+  if (!result || typeof result !== 'object' || !providers[result.provider] ||
+      !['model', 'api_key', 'workspace_id'].every(name => typeof result[name] === 'string')) throw new Error('Saved settings are invalid.');
+  return { provider: result.provider, model: result.model, api_key: result.api_key, workspace_id: result.workspace_id };
 }
 
 function updateExports() {
@@ -126,7 +184,9 @@ function selectedModel() {
 }
 
 function clearConnection() {
-  settingsRevision++;
+  settingsDraftRevision++;
+  pendingVerification = '';
+  byId('save-settings').disabled = true;
   feedback(byId('connection-status'), '');
 }
 
@@ -170,14 +230,15 @@ function updateProvider(clearKey = true) {
   privacy.rel = 'noopener noreferrer';
   privacy.textContent = 'Data terms ↗';
   note.append(pricing, document.createTextNode(' · '), privacy);
-  byId('consent-text').textContent = `I agree to send my resume text and job description to ${config.label}. API charges and its data terms may apply.`;
-  consent.checked = false;
   updateModel();
 }
 
 provider.addEventListener('change', () => { clearConnection(); updateProvider(); });
 model.addEventListener('change', () => { clearConnection(); updateModel(); });
-for (const field of [apiKey, customModel, workspaceId]) field.addEventListener('input', clearConnection);
+for (const field of [apiKey, customModel, workspaceId]) {
+  field.addEventListener('input', clearConnection);
+  field.addEventListener('change', clearConnection);
+}
 byId('toggle-key').addEventListener('click', () => {
   const show = apiKey.type === 'password';
   apiKey.type = show ? 'text' : 'password';
@@ -199,20 +260,199 @@ async function loadOptions() {
   }
 }
 
+function showSavedSettings() {
+  byId('saved-settings').hidden = !savedExists;
+  byId('unlock-settings').disabled = !savedEnvelope;
+  if (savedExists && !savedEnvelope) {
+    feedback(byId('unlock-status'), 'Saved settings cannot be read. Forget them or save a new connection.', true);
+  } else {
+    feedback(byId('unlock-status'), '');
+  }
+  if (savedExists && !activeSettings) {
+    byId('active-provider').textContent = 'Saved connection locked';
+    byId('active-model').textContent = 'Unlock and test it in AI settings.';
+  }
+}
+
+async function loadSavedSettings() {
+  try {
+    const result = await requestJson('/api/settings', undefined, 'GET');
+    savedExists = result.saved;
+    savedEnvelope = result.encrypted || null;
+    showSavedSettings();
+  } catch (error) {
+    feedback(byId('generate-status'), messageFor(error), true);
+  }
+}
+
+function setSettingsBusy(busy) {
+  settingsBusy = busy;
+  settingsFields.disabled = busy;
+  byId('close-settings').disabled = busy;
+}
+
+function activateSettings(settings) {
+  const previousProvider = activeSettings?.provider;
+  activeSettings = settings;
+  settingsRevision++;
+  const config = providers[settings.provider];
+  byId('active-provider').textContent = `${config.label} connected`;
+  byId('active-model').textContent = settings.model;
+  byId('consent-text').textContent = `I agree to send my resume text and job description to ${config.label}. API charges and its data terms may apply.`;
+  if (previousProvider !== settings.provider) consent.checked = false;
+  byId('generate').disabled = generating;
+}
+
+function updateRememberSettings() {
+  byId('password-wrap').hidden = !rememberSettings.checked;
+  savePassword.required = rememberSettings.checked;
+  confirmPassword.required = rememberSettings.checked;
+  if (!rememberSettings.checked) savePassword.value = confirmPassword.value = '';
+}
+rememberSettings.addEventListener('change', updateRememberSettings);
+
+function openSettings() {
+  if (!Object.keys(providers).length) {
+    feedback(byId('generate-status'), 'AI providers are still loading. Please try again.', true);
+    return;
+  }
+  settingsDraftRevision++;
+  if (activeSettings) {
+    provider.value = activeSettings.provider;
+    updateProvider(false);
+    if ([...model.options].some(option => option.value === activeSettings.model)) {
+      model.value = activeSettings.model;
+    } else {
+      model.value = 'custom';
+      customModel.value = activeSettings.model;
+    }
+    updateModel();
+    apiKey.value = activeSettings.api_key;
+    workspaceId.value = activeSettings.workspace_id;
+    pendingVerification = activeSettings.verification;
+    byId('save-settings').disabled = !pendingVerification;
+    feedback(byId('connection-status'), pendingVerification ? 'Connected. These settings were tested.' : 'Test the connection to continue.');
+  } else {
+    clearConnection();
+  }
+  settingsDialog.showModal();
+}
+
+for (const id of ['open-settings', 'open-settings-inline']) byId(id).addEventListener('click', openSettings);
+for (const id of ['close-settings', 'cancel-settings']) byId(id).addEventListener('click', () => settingsDialog.close());
+settingsDialog.addEventListener('cancel', event => { if (settingsBusy) event.preventDefault(); });
+settingsDialog.addEventListener('close', () => {
+  settingsDraftRevision++;
+  savePassword.value = confirmPassword.value = unlockPassword.value = '';
+  apiKey.type = 'password';
+  byId('toggle-key').textContent = 'Show';
+  byId('toggle-key').setAttribute('aria-label', 'Show API key');
+  byId('toggle-key').setAttribute('aria-pressed', 'false');
+});
+
 byId('test-provider').addEventListener('click', async () => {
   if (!provider.reportValidity() || !model.reportValidity() || !customModel.reportValidity() || !apiKey.reportValidity()) return;
-  const revision = settingsRevision;
+  clearConnection();
+  const revision = settingsDraftRevision;
   const button = byId('test-provider');
   button.disabled = true;
   feedback(byId('connection-status'), 'Testing your connection…');
   try {
     const result = await requestJson('/api/test-provider', { provider: provider.value, model: selectedModel(), api_key: apiKey.value,
       workspace_id: workspaceId.disabled ? '' : workspaceId.value.trim() });
-    if (revision === settingsRevision) feedback(byId('connection-status'), result.message);
+    if (revision === settingsDraftRevision) {
+      if (!result.verification) throw new Error('The connection test did not finish. Please try again.');
+      pendingVerification = result.verification;
+      byId('save-settings').disabled = false;
+      feedback(byId('connection-status'), result.message);
+    }
   } catch (error) {
-    if (revision === settingsRevision) feedback(byId('connection-status'), messageFor(error), true);
+    if (revision === settingsDraftRevision) feedback(byId('connection-status'), messageFor(error), true);
   } finally {
     button.disabled = false;
+  }
+});
+
+settingsForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (settingsBusy || !pendingVerification || !settingsForm.reportValidity()) return;
+  if (rememberSettings.checked && savePassword.value !== confirmPassword.value) {
+    feedback(byId('connection-status'), 'The settings passwords do not match.', true);
+    confirmPassword.focus();
+    return;
+  }
+  const settings = { provider: provider.value, model: selectedModel(), api_key: apiKey.value,
+    workspace_id: workspaceId.disabled ? '' : workspaceId.value.trim(), verification: pendingVerification };
+  setSettingsBusy(true);
+  try {
+    if (rememberSettings.checked) {
+      const current = await requestJson('/api/settings', undefined, 'GET');
+      savedExists = current.saved;
+      savedEnvelope = current.encrypted || null;
+      showSavedSettings();
+      if (savedExists && !window.confirm('Replace the saved connection on this computer?')) return;
+      feedback(byId('connection-status'), 'Encrypting and saving your connection…');
+      const encrypted = await encryptSettings(settings, savePassword.value);
+      await requestJson('/api/settings', { ...settings, encrypted }, 'PUT');
+      savedExists = true;
+      savedEnvelope = encrypted;
+      showSavedSettings();
+    }
+    activateSettings(settings);
+    settingsDialog.close();
+  } catch (error) {
+    feedback(byId('connection-status'), messageFor(error), true);
+  } finally {
+    setSettingsBusy(false);
+  }
+});
+
+byId('unlock-settings').addEventListener('click', async () => {
+  if (settingsBusy || !savedEnvelope) return;
+  if (!unlockPassword.value) {
+    feedback(byId('unlock-status'), 'Enter your settings password first.', true);
+    unlockPassword.focus();
+    return;
+  }
+  setSettingsBusy(true);
+  feedback(byId('unlock-status'), 'Unlocking and testing your connection…');
+  try {
+    let settings;
+    try {
+      settings = await decryptSettings(savedEnvelope, unlockPassword.value);
+    } catch (error) {
+      if (error.message.includes('unavailable')) throw error;
+      throw new Error('Could not unlock. Check your settings password.');
+    }
+    const result = await requestJson('/api/test-provider', settings);
+    if (!result.verification) throw new Error('The connection test did not finish. Please try again.');
+    activateSettings({ ...settings, verification: result.verification });
+    settingsDialog.close();
+  } catch (error) {
+    feedback(byId('unlock-status'), messageFor(error), true);
+  } finally {
+    setSettingsBusy(false);
+  }
+});
+
+byId('forget-settings').addEventListener('click', async () => {
+  if (settingsBusy || !window.confirm('Forget the saved connection on this computer? This cannot be undone.')) return;
+  setSettingsBusy(true);
+  try {
+    await requestJson('/api/settings', undefined, 'DELETE');
+    savedExists = false;
+    savedEnvelope = null;
+    unlockPassword.value = '';
+    showSavedSettings();
+    if (!activeSettings) {
+      byId('active-provider').textContent = 'AI not connected';
+      byId('active-model').textContent = 'Test and save an AI connection in Settings.';
+    }
+    feedback(byId('connection-status'), 'Saved connection removed.');
+  } catch (error) {
+    feedback(byId('unlock-status'), messageFor(error), true);
+  } finally {
+    setSettingsBusy(false);
   }
 });
 
@@ -304,15 +544,19 @@ byId('add-skills').addEventListener('click', () => {
 setup.addEventListener('submit', async event => {
   event.preventDefault();
   feedback(byId('generate-status'), '');
+  if (!activeSettings?.verification) {
+    feedback(byId('generate-status'), 'Test and save an AI connection in Settings first.', true);
+    return;
+  }
   if (!setup.reportValidity()) return;
   if (draftEdited && !window.confirm('Replace your edited draft with a new one?')) return;
   const revisions = [resumeRevision, jobRevision, settingsRevision, draftRevision];
   const button = byId('generate');
+  generating = true;
   button.disabled = true;
   feedback(byId('generate-status'), 'Creating your draft. This can take a moment…');
   try {
-    const result = await requestJson('/api/tailor', { provider: provider.value, model: selectedModel(), api_key: apiKey.value,
-      workspace_id: workspaceId.disabled ? '' : workspaceId.value.trim(), resume: resumeText.value,
+    const result = await requestJson('/api/tailor', { ...activeSettings, resume: resumeText.value,
       job_description: jobText.value, consent: consent.checked });
     if (revisions.some((value, index) => value !== [resumeRevision, jobRevision, settingsRevision, draftRevision][index])) {
       throw new Error('Your inputs or draft changed while generating. Your edits were kept; please generate again.');
@@ -322,9 +566,15 @@ setup.addEventListener('submit', async event => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     byId('result-heading').scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
   } catch (error) {
+    if (activeSettings && error.message.startsWith('Test this AI connection')) {
+      activeSettings.verification = '';
+      byId('active-provider').textContent = 'AI not connected';
+      byId('active-model').textContent = 'Test your connection in Settings again.';
+    }
     feedback(byId('generate-status'), messageFor(error), true);
   } finally {
-    button.disabled = false;
+    generating = false;
+    button.disabled = !activeSettings?.verification;
   }
 });
 
@@ -370,4 +620,4 @@ async function download(format) {
 
 byId('download-pdf').addEventListener('click', () => download('pdf'));
 byId('download-docx').addEventListener('click', () => download('docx'));
-loadOptions();
+loadOptions().then(loadSavedSettings);

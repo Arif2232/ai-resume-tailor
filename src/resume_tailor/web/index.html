@@ -12,7 +12,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">✳</span><span>Resume Tailor</span></a>
-    <a class="top-link" href="https://github.com/Arif2232/ai-resume-tailor" target="_blank" rel="noopener noreferrer">Open source <span aria-hidden="true">↗</span></a>
+    <div class="top-actions"><button id="open-settings" type="button" class="settings-link">⚙ <span>AI settings</span></button><a class="top-link" href="https://github.com/Arif2232/ai-resume-tailor" target="_blank" rel="noopener noreferrer">Open source <span aria-hidden="true">↗</span></a></div>
   </header>
   <main class="page">
     <section class="intro" aria-labelledby="page-title">
@@ -44,21 +44,10 @@
         </section>
 
         <section class="card" aria-labelledby="ai-heading">
-          <div class="card-heading"><span class="step">03</span><div><h2 id="ai-heading">Your AI connection</h2><p>Choose a provider and use your own key.</p></div></div>
-          <div class="fields two">
-            <div><label for="provider">Provider</label><select id="provider" required><option value="">Loading providers…</option></select></div>
-            <div><label for="model">Model</label><select id="model" required><option value="">Choose a provider</option></select></div>
-          </div>
-          <div id="custom-model-wrap" hidden><label for="custom-model">Other model ID</label><input id="custom-model" maxlength="128" disabled placeholder="Enter a model ID"></div>
-          <div id="workspace-wrap" hidden><label for="workspace-id">Claude workspace ID <span class="optional">only if your key requires it</span></label><input id="workspace-id" maxlength="128" disabled placeholder="Optional workspace ID"></div>
-          <p id="provider-note" class="hint"></p>
-          <label for="api-key">API key</label>
-          <div class="key-field"><input id="api-key" type="password" required minlength="12" maxlength="500" autocomplete="off" spellcheck="false" placeholder="Paste your provider’s API key"><button id="toggle-key" type="button" aria-label="Show API key" aria-pressed="false">Show</button></div>
-          <p class="hint"><a id="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a> · Your key stays in this tab and is not saved by the app.</p>
-          <div class="connection-row"><button id="test-provider" type="button" class="button secondary">Test connection</button><span>Optional · sends a small test request</span></div>
-          <p id="connection-status" class="feedback" role="status" hidden></p>
+          <div class="card-heading"><span class="step">03</span><div><h2 id="ai-heading">Ready to tailor</h2><p>Review your details and create your draft.</p></div></div>
+          <div class="connection-summary" aria-live="polite"><div><strong id="active-provider">AI not connected</strong><small id="active-model">Test and save an AI connection in Settings.</small></div><button id="open-settings-inline" type="button" class="button secondary">AI settings</button></div>
           <label class="consent"><input id="consent" type="checkbox" required><span id="consent-text">I agree to send my resume text and job description to the selected AI provider. API charges and provider data terms may apply.</span></label>
-          <button id="generate" class="button primary" type="submit">Tailor my resume <span aria-hidden="true">↗</span></button>
+          <button id="generate" class="button primary" type="submit" disabled>Tailor my resume <span aria-hidden="true">↗</span></button>
           <p id="generate-status" class="feedback" role="status" hidden></p>
         </section>
       </form>
@@ -86,5 +75,35 @@
     </div>
     <footer><span>Made for the next chapter.</span><span>✳</span></footer>
   </main>
+  <dialog id="settings-dialog" aria-labelledby="settings-heading">
+    <div class="dialog-heading"><div><p class="eyebrow">YOUR AI CONNECTION</p><h2 id="settings-heading">AI settings</h2><p>Test and save a connection for future sessions.</p></div><button id="close-settings" type="button" class="close-settings" aria-label="Close AI settings">×</button></div>
+    <form id="settings-form" novalidate>
+      <fieldset id="settings-fields" class="settings-fields">
+      <div id="saved-settings" class="saved-settings" hidden>
+        <strong>Saved connection</strong><p>Unlock and test your saved connection. The test sends only synthetic text and may incur a charge.</p>
+        <label for="unlock-password">Settings password</label><input id="unlock-password" type="password" maxlength="128" autocomplete="off" placeholder="Enter your settings password">
+        <div class="settings-actions"><button id="unlock-settings" type="button" class="button secondary">Unlock and test</button><button id="forget-settings" type="button" class="button text-button">Forget saved connection</button></div>
+        <p id="unlock-status" class="feedback" role="status" hidden></p>
+        <p class="hint">Or enter a different connection below.</p>
+      </div>
+      <div class="fields two">
+        <div><label for="provider">Provider</label><select id="provider" required><option value="">Loading providers…</option></select></div>
+        <div><label for="model">Model</label><select id="model" required><option value="">Choose a provider</option></select></div>
+      </div>
+      <div id="custom-model-wrap" hidden><label for="custom-model">Other model ID</label><input id="custom-model" maxlength="128" disabled placeholder="Enter a model ID"></div>
+      <div id="workspace-wrap" hidden><label for="workspace-id">Claude workspace ID <span class="optional">only if your key requires it</span></label><input id="workspace-id" maxlength="128" disabled placeholder="Optional workspace ID"></div>
+      <p id="provider-note" class="hint"></p>
+      <label for="api-key">API key</label>
+      <div class="key-field"><input id="api-key" type="password" required minlength="12" maxlength="500" autocomplete="off" spellcheck="false" placeholder="Paste your provider’s API key"><button id="toggle-key" type="button" aria-label="Show API key" aria-pressed="false">Show</button></div>
+      <p class="hint"><a id="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a> · Your key is never sent to a job website.</p>
+      <div class="connection-row"><button id="test-provider" type="button" class="button secondary">Test connection</button><span>Required · sends a small test request and may incur a charge.</span></div>
+      <p id="connection-status" class="feedback" role="status" hidden></p>
+      <label class="consent"><input id="remember-settings" type="checkbox" checked><span>Save this connection encrypted on this computer.</span></label>
+      <div id="password-wrap"><label for="save-password">Create a settings password</label><input id="save-password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required placeholder="At least 10 characters"><label for="confirm-password">Confirm password</label><input id="confirm-password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required placeholder="Repeat your settings password"><p class="hint">You’ll need this password to unlock the connection after reopening the app. It cannot be recovered.</p></div>
+      <p class="hint">Uncheck to keep the connection only in this tab. A previously saved connection remains until you forget it.</p>
+      <div class="settings-actions"><button id="save-settings" type="submit" class="button primary" disabled>Save and continue</button><button id="cancel-settings" type="button" class="button secondary">Cancel</button></div>
+      </fieldset>
+    </form>
+  </dialog>
 </body>
 </html>

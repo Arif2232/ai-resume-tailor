@@ -41,6 +41,7 @@ def test_local_api_checks_token_and_does_not_echo_secrets(monkeypatch):
     monkeypatch.setattr(server.providers, 'tailor', fake_tailor)
     data = {'provider':'openai','api_key':'dummy-secret-never-real','model':'gpt-6.1-terra',
             'resume':RESUME,'job_description':JOB,'consent':True}
+    data['verification'] = server.make_verification('openai', data['api_key'], data['model'], '')
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
         assert client.post('/api/tailor', json=data).status_code == 403
         assert client.post('/api/tailor', headers={'X-App-Token':server.TOKEN}, json=data | {'consent':False}).status_code == 400
@@ -113,6 +114,7 @@ def test_unexpected_failure_does_not_expose_the_key(monkeypatch, caplog):
     monkeypatch.setattr(server.providers, 'tailor', fail)
     key = 'dummy-secret-never-real'
     data = {'provider':'openai','api_key':key,'model':'gpt-6.1-terra','resume':RESUME,'job_description':JOB,'consent':True}
+    data['verification'] = server.make_verification('openai', key, data['model'], '')
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
         response = client.post('/api/tailor', headers={'X-App-Token':server.TOKEN}, json=data)
     assert response.status_code == 500 and key not in response.text and key not in caplog.text
@@ -125,6 +127,7 @@ def test_unverified_suggestion_is_omitted_and_reported(monkeypatch):
     monkeypatch.setattr(server.providers, 'tailor', fake_tailor)
     data = {'provider':'openai','api_key':'dummy-key-never-real','model':'gpt-6.1-terra',
             'resume':RESUME,'job_description':JOB,'consent':True}
+    data['verification'] = server.make_verification('openai', data['api_key'], data['model'], '')
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
         response = client.post('/api/tailor', headers={'X-App-Token':server.TOKEN}, json=data)
     assert response.status_code == 200

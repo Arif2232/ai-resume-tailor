@@ -1,7 +1,10 @@
-"""Local-only HTTP interface; candidate documents and keys are not persisted."""
+"""Local-only HTTP interface; documents stay in memory and saved keys are encrypted."""
 
 import asyncio
+import hashlib
 import hmac
+import json
+import re
 import secrets
 from pathlib import Path
 from typing import Literal
@@ -13,10 +16,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
-from resume_tailor import documents, exports, job_urls, providers
+from resume_tailor import documents, exports, job_urls, providers, settings_store
 
 WEB = Path(__file__).resolve().parent / 'web'
 TOKEN = secrets.token_urlsafe(32)
+VERIFICATION_SECRET = secrets.token_bytes(32)
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost'])
 app.mount('/assets', StaticFiles(directory=WEB), name='assets')
@@ -35,7 +39,11 @@ class ProviderInput(StrictInput):
     workspace_id: str = Field(default='', max_length=128)
 
 
-class TailorInput(ProviderInput):
+class VerifiedProviderInput(ProviderInput):
+    verification: str = Field(default='', max_length=64)
+
+
+class TailorInput(VerifiedProviderInput):
     resume: str = Field(min_length=20, max_length=50_000)
     job_description: str = Field(min_length=50, max_length=30_000)
     consent: bool = False
@@ -59,9 +67,28 @@ class ExportInput(StrictInput):
     confirmed: bool = False
 
 
+class SaveSettingsInput(VerifiedProviderInput):
+    encrypted: settings_store.EncryptedSettings
+
+
 def verify_token(value: str | None):
     if not value or len(value) > 128 or not value.isascii() or not hmac.compare_digest(value, TOKEN):
         raise HTTPException(status_code=403, detail='Refresh the page and try again.')
+
+
+def make_verification(provider: str, key: str, model: str, workspace_id: str) -> str:
+    key, model, workspace_id = providers.selected_settings(provider, key, model, workspace_id)
+    payload = json.dumps([provider, model, workspace_id, key], separators=(',', ':')).encode()
+    return hmac.new(VERIFICATION_SECRET, payload, hashlib.sha256).hexdigest()
+
+
+def verify_connection(data: VerifiedProviderInput):
+    try:
+        expected = make_verification(data.provider, data.api_key.get_secret_value(), data.model, data.workspace_id)
+    except providers.ProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not re.fullmatch(r'[0-9a-f]{64}', data.verification) or not hmac.compare_digest(data.verification, expected):
+        raise HTTPException(status_code=400, detail='Test this AI connection before tailoring your resume.')
 
 
 @app.exception_handler(RequestValidationError)
@@ -71,10 +98,10 @@ async def invalid_request(request: Request, exc: RequestValidationError):
 
 @app.middleware('http')
 async def security_headers(request: Request, call_next):
-    limits = {'/api/resume': 5_000_000, '/api/job-url': 10_000, '/api/test-provider': 10_000,
+    limits = {'/api/resume': 5_000_000, '/api/job-url': 10_000, '/api/test-provider': 10_000, '/api/settings': 12_000,
               '/api/tailor': 600_000, '/api/export': 300_000}
     response = None
-    if request.method == 'POST' and request.url.path in limits:
+    if request.method in ('POST', 'PUT') and request.url.path in limits:
         length = request.headers.get('content-length')
         if length is None:
             response = JSONResponse({'detail': 'A content length is required.'}, status_code=411)
@@ -137,9 +164,41 @@ async def test_provider(data: ProviderInput, x_app_token: str | None = Header(de
         async with AI_SLOTS:
             await providers.check_connection(data.provider, data.api_key.get_secret_value(), data.model,
                                              workspace_id=data.workspace_id)
-        return {'message': 'Connected. You can generate a tailored resume.'}
+        return {'message': 'Connected. You can save these settings.',
+                'verification': make_verification(data.provider, data.api_key.get_secret_value(), data.model, data.workspace_id)}
     except providers.ProviderError as exc:
         raise HTTPException(status_code=400, detail='Connection failed. ' + str(exc)) from exc
+
+
+@app.get('/api/settings')
+async def get_settings(x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    try:
+        encrypted = await asyncio.to_thread(settings_store.load_settings)
+        return {'saved': True, 'encrypted': encrypted.model_dump()} if encrypted else {'saved': False}
+    except settings_store.SettingsStoreError:
+        return {'saved': True, 'corrupt': True}
+
+
+@app.put('/api/settings')
+async def save_settings(data: SaveSettingsInput, x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    verify_connection(data)
+    try:
+        await asyncio.to_thread(settings_store.save_settings, data.encrypted)
+        return {'saved': True}
+    except settings_store.SettingsStoreError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.delete('/api/settings')
+async def delete_settings(x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    try:
+        await asyncio.to_thread(settings_store.delete_settings)
+        return {'saved': False}
+    except settings_store.SettingsStoreError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post('/api/tailor')
@@ -149,6 +208,7 @@ async def tailor_resume(data: TailorInput, x_app_token: str | None = Header(defa
         raise HTTPException(status_code=400, detail='Confirm before sending your resume to the selected AI provider.')
     if len(data.resume) < 20 or len(data.job_description) < 50:
         raise HTTPException(status_code=400, detail='Add a resume and a job description with enough detail.')
+    verify_connection(data)
     try:
         async with AI_SLOTS:
             result = await providers.tailor(data.provider, data.api_key.get_secret_value(), data.model,
