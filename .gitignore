@@ -1,0 +1,30 @@
+# Local environments and credentials
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+.venv/
+venv/
+*.pem
+*.key
+
+# Private user data and generated output
+.local/
+uploads/
+exports/
+data/private/
+
+# Python and development artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.DS_Store
